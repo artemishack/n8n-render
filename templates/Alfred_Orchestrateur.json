@@ -1,0 +1,346 @@
+{
+  "name": "Alfred_Orchestrateur",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          {
+            "fields": {
+              "message": "={{$json[\"message\"]}}"
+            }
+          }
+        ]
+      },
+      "id": "Telegram Trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [200, 200],
+      "notes": "Staging: utilise le trigger Telegram. Prod: remplacer par Webhook + vérification HMAC."
+    },
+    {
+      "parameters": {
+        "fields": {
+          "tenant_id": "={{$json.metadata.tenant_id || 'demo'}}",
+          "user_id": "={{'tg:' + $json.message.from.id}}",
+          "channel": "telegram",
+          "input_type": "={{$json.message.voice ? 'audio' : 'text'}}",
+          "text": "={{$json.message.text || ''}}",
+          "file_url": "={{$json.message.voice ? $json.message.voice.file_id : ''}}",
+          "metadata": "={{$json}}"
+        }
+      },
+      "id": "Normalize Payload",
+      "name": "Set - Normalize Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [420, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.input_type}}",
+              "operation": "equal",
+              "value2": "audio"
+            }
+          ]
+        }
+      },
+      "id": "Is Audio?",
+      "name": "IF - Audio?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [640, 180]
+    },
+    {
+      "parameters": {
+        "resource": "transcription",
+        "model": "whisper-1",
+        "audio": "binary",
+        "additionalFields": {}
+      },
+      "id": "Whisper STT",
+      "name": "OpenAI Whisper",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 2,
+      "position": [860, 60]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "systemMessage": "Tu es le routeur d'Alfred. Analyse la requête et retourne un JSON {intent, suggested_agent, confidence, slots}.",
+        "messages": [
+          {
+            "text": "={{$json.text}}"
+          }
+        ],
+        "responseFormat": "json"
+      },
+      "id": "Intent Classifier",
+      "name": "OpenAI Chat - Intent",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 2,
+      "position": [860, 320]
+    },
+    {
+      "parameters": {
+        "value1": "={{$json.intent}}",
+        "rules": [
+          {
+            "operation": "equal",
+            "value2": "mail",
+            "output": "Agent_Mail"
+          },
+          {
+            "operation": "equal",
+            "value2": "calendar",
+            "output": "Agent_Calendar"
+          },
+          {
+            "operation": "equal",
+            "value2": "crm",
+            "output": "Agent_CRM"
+          }
+        ],
+        "fallbackOutput": "Agent_Default"
+      },
+      "id": "Switch Intent",
+      "name": "Switch Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [1080, 320]
+    },
+    {
+      "parameters": {
+        "workflowId": "Agent_Mail",
+        "options": {}
+      },
+      "id": "Call Agent Mail",
+      "name": "Execute Agent Mail",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [1300, 180]
+    },
+    {
+      "parameters": {
+        "workflowId": "Agent_Calendar",
+        "options": {}
+      },
+      "id": "Call Agent Calendar",
+      "name": "Execute Agent Calendar",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [1300, 320]
+    },
+    {
+      "parameters": {
+        "workflowId": "Agent_CRM",
+        "options": {}
+      },
+      "id": "Call Agent CRM",
+      "name": "Execute Agent CRM",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [1300, 460]
+    },
+    {
+      "parameters": {
+        "text": "={{$json.output_message}}"
+      },
+      "id": "Send Telegram",
+      "name": "Telegram Send Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1540, 320]
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "={{$env.SUPABASE_REST_URL + '/rpc/log_run'}}",
+        "jsonParameters": true,
+        "options": {},
+        "body": {
+          "tenant_id": "={{$json.tenant_id}}",
+          "agent": "={{$json.agent}}",
+          "status": "={{$json.status}}",
+          "duration_ms": "={{$json.duration_ms}}",
+          "cost": "={{$json.cost}}",
+          "error": "={{$json.error_message || ''}}"
+        }
+      },
+      "id": "Log Run",
+      "name": "HTTP Request - LogRun",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [1740, 320]
+    },
+    {
+      "parameters": {
+        "message": "Désolé, une erreur est survenue. L'équipe a été notifiée."
+      },
+      "id": "Error Handler",
+      "name": "Telegram Error Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1540, 500]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set - Normalize Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Normalize Payload": {
+      "main": [
+        [
+          {
+            "node": "IF - Audio?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "OpenAI Chat - Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Audio?": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Whisper",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "OpenAI Whisper": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Chat - Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat - Intent": {
+      "main": [
+        [
+          {
+            "node": "Switch Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Intent": {
+      "main": [
+        [
+          {
+            "node": "Execute Agent Mail",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Execute Agent Calendar",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Execute Agent CRM",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Execute Agent Mail": {
+      "main": [
+        [
+          {
+            "node": "Telegram Send Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "Telegram Error Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Agent Calendar": {
+      "main": [
+        [
+          {
+            "node": "Telegram Send Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "Telegram Error Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Agent CRM": {
+      "main": [
+        [
+          {
+            "node": "Telegram Send Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "Telegram Error Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Send Message": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - LogRun",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

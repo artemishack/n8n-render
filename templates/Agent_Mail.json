@@ -1,0 +1,262 @@
+{
+  "name": "Agent_Mail",
+  "nodes": [
+    {
+      "parameters": {
+        "fields": {
+          "tenant_id": "={{$json.tenant_id}}",
+          "text": "={{$json.text}}",
+          "intent": "={{$json.intent}}",
+          "slots": "={{$json.slots}}"
+        }
+      },
+      "id": "Set Input",
+      "name": "Set - Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [200, 200]
+    },
+    {
+      "parameters": {
+        "requestMethod": "GET",
+        "url": "={{$env.SUPABASE_REST_URL + '/rest/v1/connections'}}",
+        "qs": {
+          "tenant_id": "={{$json.tenant_id}}",
+          "app": "mail"
+        },
+        "options": {
+          "headers": {
+            "apikey": "={{$env.SUPABASE_SERVICE_ROLE}}"
+          }
+        }
+      },
+      "id": "Fetch Credentials",
+      "name": "HTTP Request - GetConnection",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [420, 200]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "systemMessage": "Tu es l'agent mail d'Alfred. Détermine l'action à réaliser (send|reply|search) et les paramètres nécessaires. Retourne un JSON {action, subject, body, thread_id, summary, artifacts}.",
+        "messages": [
+          {
+            "text": "={{$json.text}}"
+          }
+        ],
+        "responseFormat": "json"
+      },
+      "id": "Plan Action",
+      "name": "OpenAI Chat - Plan",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 2,
+      "position": [640, 200]
+    },
+    {
+      "parameters": {
+        "value1": "={{$json.action}}",
+        "rules": [
+          {
+            "operation": "equal",
+            "value2": "send",
+            "output": "send"
+          },
+          {
+            "operation": "equal",
+            "value2": "reply",
+            "output": "reply"
+          },
+          {
+            "operation": "equal",
+            "value2": "search",
+            "output": "search"
+          }
+        ],
+        "fallbackOutput": "search"
+      },
+      "id": "Switch Action",
+      "name": "Switch Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [860, 200]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "systemMessage": "Rédige l'e-mail final en HTML.",
+        "messages": [
+          {
+            "text": "Sujet: ={{$json.subject}}\nContexte: ={{$json.body}}"
+          }
+        ]
+      },
+      "id": "Draft Email",
+      "name": "OpenAI Chat - Draft",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 2,
+      "position": [1080, 80]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "additionalFields": {
+          "toList": "={{$json.slots.recipient}}",
+          "subject": "={{$json.subject}}",
+          "body": "={{$json.body_html || $json.body}}"
+        }
+      },
+      "id": "Send Gmail",
+      "name": "Gmail Send",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [1300, 80]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "search",
+        "additionalFields": {
+          "query": "={{$json.slots.query || $json.text}}"
+        }
+      },
+      "id": "Search Gmail",
+      "name": "Gmail Search",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [1080, 200]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "additionalFields": {
+          "messageId": "={{$json.thread_id}}",
+          "body": "={{$json.body_html || $json.body}}"
+        }
+      },
+      "id": "Reply Gmail",
+      "name": "Gmail Reply",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [1080, 320]
+    },
+    {
+      "parameters": {
+        "fields": {
+          "status": "success",
+          "agent": "Agent_Mail",
+          "output_message": "={{$json.summary || 'Action mail terminée'}}",
+          "artifacts": "={{$json.artifacts || []}}",
+          "metadata": "={{$json}}"
+        }
+      },
+      "id": "Format Output",
+      "name": "Set - Output",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [1520, 200]
+    }
+  ],
+  "connections": {
+    "Set - Input": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - GetConnection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - GetConnection": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Chat - Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat - Plan": {
+      "main": [
+        [
+          {
+            "node": "Switch Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Action": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Chat - Draft",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gmail Reply",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Gmail Search",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat - Draft": {
+      "main": [
+        [
+          {
+            "node": "Gmail Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Send": {
+      "main": [
+        [
+          {
+            "node": "Set - Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Reply": {
+      "main": [
+        [
+          {
+            "node": "Set - Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Search": {
+      "main": [
+        [
+          {
+            "node": "Set - Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

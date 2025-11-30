@@ -1,0 +1,228 @@
+{
+  "name": "Agent_CRM",
+  "nodes": [
+    {
+      "parameters": {
+        "fields": {
+          "tenant_id": "={{$json.tenant_id}}",
+          "text": "={{$json.text}}",
+          "intent": "={{$json.intent}}",
+          "slots": "={{$json.slots}}"
+        }
+      },
+      "id": "Set Input",
+      "name": "Set - Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [200, 200]
+    },
+    {
+      "parameters": {
+        "requestMethod": "GET",
+        "url": "={{$env.SUPABASE_REST_URL + '/rest/v1/connections'}}",
+        "qs": {
+          "tenant_id": "={{$json.tenant_id}}",
+          "app": "crm"
+        },
+        "options": {
+          "headers": {
+            "apikey": "={{$env.SUPABASE_SERVICE_ROLE}}"
+          }
+        }
+      },
+      "id": "Fetch Credentials",
+      "name": "HTTP Request - GetConnection",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [420, 200]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "systemMessage": "Tu es l'agent CRM d'Alfred. Identifie l'action (create_contact|update_deal|lookup_record) et les champs nécessaires. Retourne un JSON {action, object, properties, summary, artifacts}.",
+        "messages": [
+          {
+            "text": "={{$json.text}}"
+          }
+        ],
+        "responseFormat": "json"
+      },
+      "id": "Plan Action",
+      "name": "OpenAI Chat - Plan",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 2,
+      "position": [640, 200]
+    },
+    {
+      "parameters": {
+        "value1": "={{$json.action}}",
+        "rules": [
+          {
+            "operation": "equal",
+            "value2": "create_contact",
+            "output": "create_contact"
+          },
+          {
+            "operation": "equal",
+            "value2": "update_deal",
+            "output": "update_deal"
+          },
+          {
+            "operation": "equal",
+            "value2": "lookup_record",
+            "output": "lookup_record"
+          }
+        ],
+        "fallbackOutput": "lookup_record"
+      },
+      "id": "Switch Action",
+      "name": "Switch Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [860, 200]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "object": "contact",
+        "properties": "={{$json.properties}}"
+      },
+      "id": "Create Contact",
+      "name": "HubSpot Create Contact",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 1,
+      "position": [1080, 80]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "object": "deal",
+        "objectId": "={{$json.properties.id}}",
+        "properties": "={{$json.properties}}"
+      },
+      "id": "Update Deal",
+      "name": "HubSpot Update Deal",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 1,
+      "position": [1080, 200]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "object": "={{$json.object || 'contact'}}",
+        "filters": "={{$json.properties}}",
+        "returnAll": true
+      },
+      "id": "Lookup Record",
+      "name": "HubSpot Lookup",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 1,
+      "position": [1080, 320]
+    },
+    {
+      "parameters": {
+        "fields": {
+          "status": "success",
+          "agent": "Agent_CRM",
+          "output_message": "={{$json.summary || 'Action CRM terminée'}}",
+          "artifacts": "={{$json.artifacts || []}}",
+          "metadata": "={{$json}}"
+        }
+      },
+      "id": "Format Output",
+      "name": "Set - Output",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [1520, 200]
+    }
+  ],
+  "connections": {
+    "Set - Input": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - GetConnection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - GetConnection": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Chat - Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat - Plan": {
+      "main": [
+        [
+          {
+            "node": "Switch Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Action": {
+      "main": [
+        [
+          {
+            "node": "HubSpot Create Contact",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HubSpot Update Deal",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "HubSpot Lookup",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "HubSpot Create Contact": {
+      "main": [
+        [
+          {
+            "node": "Set - Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot Update Deal": {
+      "main": [
+        [
+          {
+            "node": "Set - Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot Lookup": {
+      "main": [
+        [
+          {
+            "node": "Set - Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,244 @@
+{
+  "name": "Agent_Calendar",
+  "nodes": [
+    {
+      "parameters": {
+        "fields": {
+          "tenant_id": "={{$json.tenant_id}}",
+          "text": "={{$json.text}}",
+          "slots": "={{$json.slots}}"
+        }
+      },
+      "id": "Set Input",
+      "name": "Set - Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [200, 200]
+    },
+    {
+      "parameters": {
+        "requestMethod": "GET",
+        "url": "={{$env.SUPABASE_REST_URL + '/rest/v1/connections'}}",
+        "qs": {
+          "tenant_id": "={{$json.tenant_id}}",
+          "app": "calendar"
+        },
+        "options": {
+          "headers": {
+            "apikey": "={{$env.SUPABASE_SERVICE_ROLE}}"
+          }
+        }
+      },
+      "id": "Fetch Credentials",
+      "name": "HTTP Request - GetConnection",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [420, 200]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "systemMessage": "Identifie le type d'action calendrier (create|update|list) et extrait date, heure, participants, titre. Retourne un JSON {action, start_iso, end_iso, attendees, title, description, summary}.",
+        "messages": [
+          {
+            "text": "={{$json.text}}"
+          }
+        ],
+        "responseFormat": "json"
+      },
+      "id": "Parse Slots",
+      "name": "OpenAI Chat - Parse",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 2,
+      "position": [640, 200]
+    },
+    {
+      "parameters": {
+        "value1": "={{$json.action}}",
+        "rules": [
+          {
+            "operation": "equal",
+            "value2": "create",
+            "output": "create"
+          },
+          {
+            "operation": "equal",
+            "value2": "update",
+            "output": "update"
+          },
+          {
+            "operation": "equal",
+            "value2": "list",
+            "output": "list"
+          }
+        ],
+        "fallbackOutput": "list"
+      },
+      "id": "Switch Action",
+      "name": "Switch Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [860, 200]
+    },
+    {
+      "parameters": {
+        "resource": "event",
+        "operation": "create",
+        "additionalFields": {
+          "calendarId": "primary",
+          "summary": "={{$json.title}}",
+          "description": "={{$json.description}}",
+          "start": "={{$json.start_iso}}",
+          "end": "={{$json.end_iso}}",
+          "attendees": "={{$json.attendees}}"
+        }
+      },
+      "id": "Create Event",
+      "name": "Google Calendar Create",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [1080, 80]
+    },
+    {
+      "parameters": {
+        "resource": "event",
+        "operation": "update",
+        "additionalFields": {
+          "calendarId": "primary",
+          "eventId": "={{$json.slots.event_id}}",
+          "summary": "={{$json.title}}",
+          "start": "={{$json.start_iso}}",
+          "end": "={{$json.end_iso}}"
+        }
+      },
+      "id": "Update Event",
+      "name": "Google Calendar Update",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [1080, 200]
+    },
+    {
+      "parameters": {
+        "resource": "event",
+        "operation": "getAll",
+        "additionalFields": {
+          "calendarId": "primary",
+          "returnAll": true,
+          "query": "={{$json.slots.query || ''}}",
+          "timeMin": "={{$json.start_iso}}",
+          "timeMax": "={{$json.end_iso}}"
+        }
+      },
+      "id": "List Events",
+      "name": "Google Calendar List",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [1080, 320]
+    },
+    {
+      "parameters": {
+        "fields": {
+          "status": "success",
+          "agent": "Agent_Calendar",
+          "output_message": "={{$json.summary || 'Action calendrier terminée'}}",
+          "artifacts": "={{$json.artifacts || []}}",
+          "metadata": "={{$json}}"
+        }
+      },
+      "id": "Format Output",
+      "name": "Set - Output",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [1520, 200]
+    }
+  ],
+  "connections": {
+    "Set - Input": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - GetConnection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - GetConnection": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Chat - Parse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat - Parse": {
+      "main": [
+        [
+          {
+            "node": "Switch Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Action": {
+      "main": [
+        [
+          {
+            "node": "Google Calendar Create",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Calendar Update",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Google Calendar List",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Google Calendar Create": {
+      "main": [
+        [
+          {
+            "node": "Set - Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Calendar Update": {
+      "main": [
+        [
+          {
+            "node": "Set - Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Calendar List": {
+      "main": [
+        [
+          {
+            "node": "Set - Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
